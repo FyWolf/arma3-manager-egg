@@ -70,13 +70,7 @@ jobs:
       # be installed — and it would only surface on someone's live panel.
       - name: The generated install script is valid bash
         run: |
-          python - <<'PY'
-          import json
-          egg = json.load(open('egg-arma3-manager.json'))
-          open('/tmp/install.sh', 'w', newline='
-').write(
-              egg['scripts']['installation']['script'])
-          PY
+          jq -r '.scripts.installation.script' egg-arma3-manager.json > /tmp/install.sh
           bash -n /tmp/install.sh
 
       - name: The egg is valid JSON and declares what the panel needs

@@ -3,7 +3,7 @@
 
 The egg is *derived*, never hand-edited. Upstream owns the install script, the
 config-file parsers and twenty-six variables, all of which change over time; the
-only things this fork owns are the image, the identity and three added
+only things this fork owns are the image, the identity and a handful of added
 variables. Keeping that as a transform means pulling a newer upstream egg is
 re-running this script and reading the diff, rather than replaying edits by hand
 into a 21 KB JSON document and hoping nothing was missed.
@@ -24,29 +24,16 @@ REPO = "https://github.com/FyWolf/arma3-manager-egg"
 
 # The variables this fork adds. Everything else on the egg is upstream's.
 #
-# All three are `user_viewable` but only SYNC_ONLY is `user_editable`: a customer
-# has a real reason to press "download without starting", and no reason at all to
-# retune a poll interval or switch the progress reporting off. Both of those are
-# host-side knobs, visible so that a support conversation can confirm what they
-# are set to.
+# All are `user_viewable` and none is `user_editable`: every one of them is a
+# host-side knob, and a customer has no reason to retune a poll interval or
+# switch progress reporting off. They stay visible so a support conversation can
+# confirm what they are set to.
+#
+# There is deliberately no "download without starting" variable. Mods are fetched
+# by the server's own container — at boot, or on request by the sync daemon while
+# it runs — and a variable that makes the container exit instead of starting is a
+# server that never comes back up if anyone forgets to unset it.
 ADDED = [
-    OrderedDict([
-        ("name", "[A3M] Sync Mods Without Starting"),
-        ("description",
-         "When enabled, the container downloads and updates all mods and then exits "
-         "without starting the game server. Use this to fetch a large mod set before "
-         "a session rather than making players wait through it at boot.\n\n"
-         "Arma reads its mod list once, at startup, so mods fetched while a server is "
-         "running would not load until the next restart anyway — this only decides "
-         "when that restart happens.\n\n"
-         "Remember to turn this back off, or the server will never start. "
-         "(1 Enable | 0 Disable)"),
-        ("env_variable", "A3M_SYNC_ONLY"),
-        ("default_value", "0"),
-        ("user_viewable", True),
-        ("user_editable", True),
-        ("rules", ["required", "boolean"]),
-    ]),
     OrderedDict([
         ("name", "[A3M] Background Mod Downloads"),
         ("description",
@@ -121,83 +108,6 @@ ADDED = [
 ]
 
 
-# Prepended to upstream's install script.
-#
-# Wings' `reinstall` is the one API that starts a container on a stopped
-# server's volume: it waits for the server to be offline, mounts the volume at
-# /mnt/server, and runs this script. Wings' own comment on the function is the
-# guarantee this relies on — "This does not touch any existing files for the
-# server, other than what the script modifies."
-#
-# So a reinstall whose script only downloads mods *is* the dummy container, and
-# it is how mods are fetched while the server is down without asking the
-# customer to set A3M_SYNC_ONLY and remember to unset it.
-#
-# The real work is done by a3m-sync.sh, fetched rather than reimplemented. The
-# installer image is not ours — it is upstream's Debian image, running as root,
-# which our game image is not — so the scripts cannot simply be baked in. This
-# egg already curls server.cfg and basic.cfg from GitHub during install, so a
-# fetch here is the established pattern rather than a new dependency.
-#
-# Reimplementing the download loop inline was the alternative and is the wrong
-# one: the panel reads status.json, and a second implementation of it would
-# drift from the daemon's while continuing to parse.
-A3M_INSTALL_PREFIX = '''#!/bin/bash
-
-## A3M === MODS-ONLY FAST PATH ===
-##
-## Runs when the panel has left a download request on the volume and the game is
-## already installed. Fetches only the requested Workshop mods and exits, instead
-## of re-validating twenty-odd gigabytes of game files nobody asked about.
-##
-## Falls through to the full install below whenever it cannot do that safely.
-
-A3M_REQUEST_FILE="/mnt/server/.arma3-manager/request.json"
-A3M_SCRIPT_REF="${A3M_SCRIPT_REF:-main}"
-A3M_SCRIPT_BASE="https://raw.githubusercontent.com/FyWolf/arma3-manager-egg/${A3M_SCRIPT_REF}/image"
-
-if [[ -f ${A3M_REQUEST_FILE} ]] \\
-    && { [[ -f /mnt/server/arma3server_x64 ]] || [[ -f /mnt/server/arma3server ]]; } \\
-    && [[ -f /mnt/server/steamcmd/steamcmd.sh ]]; then
-
-    echo -e "\\n[A3M]: A mod download was requested and the game is already installed."
-    echo -e "[A3M]: Fetching only the requested mods. The game files are not touched.\\n"
-
-    apt -y update > /dev/null 2>&1
-    apt -y --no-install-recommends install curl ca-certificates jq > /dev/null 2>&1
-
-    cd /mnt/server || exit 0
-    export HOME=/mnt/server
-
-    if curl -sSLf -o /tmp/a3m-common.sh "${A3M_SCRIPT_BASE}/a3m-common.sh" \\
-        && curl -sSLf -o /tmp/a3m-sync.sh "${A3M_SCRIPT_BASE}/a3m-sync.sh"; then
-
-        chmod +x /tmp/a3m-sync.sh
-        A3M_COMMON=/tmp/a3m-common.sh bash /tmp/a3m-sync.sh once
-
-        echo -e "\\n[A3M]: Mod download finished. The server can be started.\\n"
-
-        # Exit 0 even if individual mods failed. A non-zero exit here marks the
-        # whole server as install-failed in the panel, which is a far worse
-        # state than one mod missing — and the per-mod reasons are already in
-        # status.json, where the Mods page shows them on the row that failed.
-        exit 0
-    fi
-
-    # The request is deliberately left in place. The sync daemon picks it up the
-    # next time the server starts, so the mods still arrive; they arrive later.
-    # Exiting non-zero here would flag the server as broken over a failed
-    # download of two shell scripts.
-    echo -e "\\n[A3M]: Could not fetch the sync scripts from GitHub."
-    echo -e "[A3M]: The request has been left queued and will run at the next server start.\\n"
-    exit 0
-fi
-
-## A3M === END FAST PATH — upstream's install script follows, unmodified ===
-
-'''
-
-
 def main() -> int:
     with open(UPSTREAM, encoding="utf-8") as handle:
         egg = json.load(handle, object_pairs_hook=OrderedDict)
@@ -215,7 +125,8 @@ def main() -> int:
         "Arma 3 dedicated server with machine-readable mod download progress, for use "
         "with the Arma 3 Manager panel plugin. Downloads mods exactly as the stock egg "
         "does, and additionally reports per-mod state, percentage and failure reasons "
-        "to .arma3-manager/status.json, and can sync mods without starting the game."
+        "to .arma3-manager/status.json, and can download mods in the background while "
+        "the server is running."
     )
 
     # A distinct uuid: same uuid as upstream would make this an *update* to the
@@ -239,18 +150,6 @@ def main() -> int:
         if tag not in tags:
             tags.append(tag)
     egg["tags"] = tags
-
-    # Prepend the mods-only fast path to upstream's install script.
-    #
-    # Upstream's script keeps its own shebang, which becomes a harmless comment
-    # once it is no longer on the first line; stripping it would make the diff
-    # against upstream larger than the change actually is.
-    script = egg["scripts"]["installation"]["script"]
-
-    if "A3M === MODS-ONLY FAST PATH" in script:
-        raise SystemExit("Upstream script already carries the fast path — reconcile before regenerating.")
-
-    egg["scripts"]["installation"]["script"] = A3M_INSTALL_PREFIX + script
 
     existing = {v.get("env_variable") for v in egg.get("variables", [])}
     highest = max((v.get("sort") or 0) for v in egg.get("variables", [])) if egg.get("variables") else 0

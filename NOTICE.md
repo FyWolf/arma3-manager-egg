@@ -25,13 +25,11 @@ Modifications, © 2026 FyWolf. Every one of them is marked in-file with `A3M`:
    upstream skips as already-current is marked `done`.
 3. **A background monitor** rewrites the status file on a timer while SteamCMD
    works, so a large mod shows a moving percentage.
-4. **`A3M_SYNC_ONLY`.** When set, mods are downloaded and updated and the script
-   exits 0 without starting the game server.
-5. **A background sync daemon** is started alongside the game server and killed
+4. **A background sync daemon** is started alongside the game server and killed
    with it, so mods can be downloaded at any time without a restart.
-6. **The A3M functions were moved** into `a3m-common.sh`, which the entrypoint
+5. **The A3M functions were moved** into `a3m-common.sh`, which the entrypoint
    sources, so the daemon and the boot-time download report identically.
-7. **Header comment** recording the fork and pointing here.
+6. **Header comment** recording the fork and pointing here.
 
 Nothing else is changed. The SteamCMD invocation, retry and error handling, mod
 linking, key handling, lowercase repair, headless clients, parameter file
@@ -70,16 +68,13 @@ by David Wolfe (Red-Thirten), MIT licensed.
 It is **generated** by [`build-egg.py`](build-egg.py) rather than edited, so the
 difference from upstream stays reviewable. The transform changes the egg's
 identity (name, author, uuid, description, tags), repoints `docker_images` at
-this repository's image, and appends three variables — `A3M_SYNC_ONLY`,
-`A3M_POLL_INTERVAL` and `A3M_DISABLE`.
+this repository's image, and appends five variables, all prefixed
+`A3M_`.
 
-It also **prepends a mods-only fast path to the install script**. Upstream's
-script is preserved verbatim below it and still runs whenever the fast path does
-not apply; the transform refuses if upstream ever gains a marker of its own.
-
-The config-file parsers, the startup command, the installer container image and
-all twenty-five upstream variables are passed through unchanged; `build-egg.py`
-fails rather than overwrite an upstream variable that gains one of these names.
+The install script, the config-file parsers, the startup command, the installer
+container image and all twenty-five upstream variables are passed through
+**unchanged**; `build-egg.py` fails rather than overwrite an upstream variable
+that gains one of these names.
 
 `upstream-egg-arma3.json` is a verbatim copy of the source document, kept so the
 transform can be re-run and diffed.

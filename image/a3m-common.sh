@@ -21,10 +21,9 @@
 : "${WORKSHOP_DIR:=./Steam/steamapps/workshop}"
 : "${GAME_ID:=107410}"
 
-# Read by A3M_Enabled and A3M_Render. Defaulted because an egg need not declare
-# them, and an absent variable would abort a caller running under `set -u`.
+# Read by A3M_Enabled. Defaulted because an egg need not declare it, and an
+# absent variable would abort a caller running under `set -u`.
 : "${A3M_DISABLE:=}"
-: "${A3M_SYNC_ONLY:=}"
 
 ## A3M === ARMA 3 MANAGER CONSTANTS ===
 A3M_DIR="./.arma3-manager"                      # Everything this fork writes lives here and nowhere else
@@ -172,12 +171,10 @@ function A3M_Render { #[No input]
     } | jq -s \
         --arg phase "${phase}" \
         --argjson ts "$(date +%s)" \
-        --argjson syncOnly "$( [[ ${A3M_SYNC_ONLY} == "1" ]] && echo true || echo false )" \
         '{
             version: 1,
             updated_at: $ts,
             phase: $phase,
-            sync_only: $syncOnly,
             totals: {
                 total: length,
                 done: (map(select(.state == "done")) | length),

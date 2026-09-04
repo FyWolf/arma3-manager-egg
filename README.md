@@ -42,7 +42,6 @@ forever, and the customer waits for something that already gave up.
   "version": 1,
   "updated_at": 1757001234,
   "phase": "mods",
-  "sync_only": false,
   "totals": { "total": 4, "done": 2, "downloading": 1, "waiting": 0, "failed": 1 },
   "mods": [
     { "id": "450814997", "state": "done",        "name": "CBA_A3", "bytes": 231334, "expected_bytes": 231334, "percent": 100, "error": null },
@@ -52,7 +51,8 @@ forever, and the customer waits for something that already gave up.
 }
 ```
 
-`phase` is one of `starting`, `mods`, `running`, `synced`, `synced_with_errors`.
+`phase` is one of `starting`, `mods`, `running`, `syncing`, `synced`,
+`synced_with_errors`.
 A mod's `state` is `waiting`, `downloading`, `done` or `failed`.
 
 The file is written to a temporary name and **moved** into place, so a poll never
@@ -139,59 +139,14 @@ changes at all, which is the whole point.
 
 ### When the server is off
 
-The daemon only exists while the server does, so with the server stopped there is
-no container to ask. The egg handles that case too, through the one Wings API
-that starts a container against a stopped server's volume: **reinstall**.
+Nothing runs, because there is no container — so a request simply waits, and the
+next server start picks it up. That start downloads it before launching the game,
+exactly as upstream does.
 
-Wings waits for the server to be offline, mounts the volume at `/mnt/server`, and
-runs this egg's install script — and its own comment on that function is the
-guarantee the whole thing rests on:
-
-> Reinstall reinstalls a server's software by utilizing the installation script
-> for the server egg. **This does not touch any existing files for the server,
-> other than what the script modifies.**
-
-So the install script carries a **mods-only fast path**. When it finds a pending
-`request.json` and an already-installed game, it fetches just those mods and
-exits, instead of re-validating twenty-odd gigabytes of game files nobody asked
-about. It is a download that happens to be spelled "reinstall".
-
-The panel triggers this automatically when it sees the server is offline, so
-**Download now** behaves the same either way — the only visible difference is
-that the server shows as *Installing* for the duration.
-
-The fast path does the real work by fetching `a3m-common.sh` and `a3m-sync.sh`
-and running `a3m-sync.sh once`, rather than reimplementing the download loop. The
-installer image is upstream's Debian one, running as root, which the game image
-is not — so the scripts cannot simply be baked in. Reimplementing them inline was
-the alternative and is the wrong one: the panel reads `status.json`, and a second
-implementation of it would drift from the daemon's while continuing to parse.
-
-It **never exits non-zero.** A failed install marks the whole server broken in
-the panel, which is a far worse state than one mod missing — and the per-mod
-reasons are already in `status.json`. If the scripts cannot be fetched at all,
-the request is left queued and the next server start picks it up.
-
-This makes `A3M_SYNC_ONLY` largely redundant: it exists for the same job but
-requires the customer to set a variable and remember to unset it, or the server
-never starts again.
-
-## Sync without starting the server
-
-Set `A3M_SYNC_ONLY=1`. The container downloads and updates every mod, writes the
-final status, and exits **0** without launching Arma.
-
-Exit 0 matters: Wings treats a non-zero exit as a crash, and a crash-restart
-policy would turn download-and-exit into a loop.
-
-This is what lets a customer fetch a 40 GB mod set in the afternoon and start the
-server in the evening without the wait. It does not let mods change under a
-*running* server, and nothing can — Arma reads its mod list once, at startup. The
-only thing ever in question is when the restart happens; this puts that in the
-customer's hands.
-
-Remember to set it back to `0`, or the server will never start. The console says
-so on every sync.
+Downloading with **no** container at all is not possible: Wings has no API for it
+beyond `reinstall`, which re-runs the whole install script and takes the server to
+*Installing*. That was tried and deliberately dropped — mods are fetched by the
+server's own container, at boot or by the daemon, and nothing else.
 
 ## Installing
 
@@ -213,7 +168,6 @@ The image is published to `ghcr.io/fywolf/arma3-manager-egg:latest`.
 
 | Variable | Default | Editable by customer | What it does |
 |---|---|---|---|
-| `A3M_SYNC_ONLY` | `0` | yes | Download mods, then exit without starting the server |
 | `A3M_BACKGROUND_SYNC` | `1` | no | Run the downloader alongside the server |
 | `A3M_SYNC_POLL` | `10` | no | Seconds between checks for a download request |
 | `A3M_SYNC_NICE` | `10` | no | How far the downloader yields to the game (`nice`, 0–19) |
@@ -227,6 +181,10 @@ node and buys nothing but a smoother bar.
 `A3M_DISABLE` exists to answer "is this fork the problem?" in one restart. With
 it set the container behaves exactly as the stock image and the plugin falls back
 to directory probing.
+
+There is deliberately **no** "download without starting" variable. One existed
+and was removed: it made the container exit instead of launching, which is a
+server that never comes back up if anyone forgets to unset it.
 
 ## Developing
 

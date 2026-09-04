@@ -63,9 +63,15 @@ USER        container
 ENV         USER=container HOME=/home/container
 WORKDIR     /home/container
 
-## Copy over entrypoint.sh and set permissions
+## Copy over the entrypoint and the two A3M scripts it needs.
+##
+## a3m-common.sh is sourced by both the entrypoint and the sync daemon, so the
+## boot-time download and a background one report through identical code — the
+## panel cannot tell which fetched a mod, and there is no second copy to drift.
 COPY        --chown=container:container ./entrypoint.sh /entrypoint.sh
-RUN         chmod +x /entrypoint.sh
+COPY        --chown=container:container ./a3m-common.sh /a3m-common.sh
+COPY        --chown=container:container ./a3m-sync.sh /a3m-sync.sh
+RUN         chmod +x /entrypoint.sh /a3m-sync.sh
 
 ## Start with Tini to pass future stop signals correctly
 STOPSIGNAL  SIGINT

@@ -48,6 +48,49 @@ ADDED = [
         ("rules", ["required", "boolean"]),
     ]),
     OrderedDict([
+        ("name", "[A3M] Background Mod Downloads"),
+        ("description",
+         "Runs a mod downloader alongside the game server, so mods can be fetched at "
+         "any time from the panel without stopping or restarting anything.\n\n"
+         "Downloads go into the SteamCMD cache. The mods themselves are activated at "
+         "the next restart, because Arma reads its mod list once at startup and there "
+         "is no way around that — but the restart is then instant instead of waiting "
+         "for a download.\n\n"
+         "Turn this off to get the stock behaviour, where mods are only ever fetched "
+         "while the server boots. (1 Enable | 0 Disable)"),
+        ("env_variable", "A3M_BACKGROUND_SYNC"),
+        ("default_value", "1"),
+        ("user_viewable", True),
+        ("user_editable", False),
+        ("rules", ["required", "boolean"]),
+    ]),
+    OrderedDict([
+        ("name", "[A3M] Background Sync Check Interval"),
+        ("description",
+         "Seconds between checks for a download request from the panel. This is a "
+         "cheap check for one file, so a short interval costs almost nothing — it "
+         "mostly decides how quickly a customer sees their download start."),
+        ("env_variable", "A3M_SYNC_POLL"),
+        ("default_value", "10"),
+        ("user_viewable", True),
+        ("user_editable", False),
+        ("rules", ["required", "integer", "between:2,600"]),
+    ]),
+    OrderedDict([
+        ("name", "[A3M] Background Sync Priority"),
+        ("description",
+         "How far the background downloader yields to the game server, as a `nice` "
+         "value from 0 (equal footing) to 19 (only spare capacity).\n\n"
+         "Arma is latency sensitive in a way a download is not, so the default leans "
+         "well away from the game. A background sync that costs the players their "
+         "tickrate is not a background sync."),
+        ("env_variable", "A3M_SYNC_NICE"),
+        ("default_value", "10"),
+        ("user_viewable", True),
+        ("user_editable", False),
+        ("rules", ["required", "integer", "between:0,19"]),
+    ]),
+    OrderedDict([
         ("name", "[A3M] Progress Poll Interval"),
         ("description",
          "Seconds between rewrites of .arma3-manager/status.json while mods download. "
@@ -76,6 +119,83 @@ ADDED = [
         ("rules", ["required", "boolean"]),
     ]),
 ]
+
+
+# Prepended to upstream's install script.
+#
+# Wings' `reinstall` is the one API that starts a container on a stopped
+# server's volume: it waits for the server to be offline, mounts the volume at
+# /mnt/server, and runs this script. Wings' own comment on the function is the
+# guarantee this relies on — "This does not touch any existing files for the
+# server, other than what the script modifies."
+#
+# So a reinstall whose script only downloads mods *is* the dummy container, and
+# it is how mods are fetched while the server is down without asking the
+# customer to set A3M_SYNC_ONLY and remember to unset it.
+#
+# The real work is done by a3m-sync.sh, fetched rather than reimplemented. The
+# installer image is not ours — it is upstream's Debian image, running as root,
+# which our game image is not — so the scripts cannot simply be baked in. This
+# egg already curls server.cfg and basic.cfg from GitHub during install, so a
+# fetch here is the established pattern rather than a new dependency.
+#
+# Reimplementing the download loop inline was the alternative and is the wrong
+# one: the panel reads status.json, and a second implementation of it would
+# drift from the daemon's while continuing to parse.
+A3M_INSTALL_PREFIX = '''#!/bin/bash
+
+## A3M === MODS-ONLY FAST PATH ===
+##
+## Runs when the panel has left a download request on the volume and the game is
+## already installed. Fetches only the requested Workshop mods and exits, instead
+## of re-validating twenty-odd gigabytes of game files nobody asked about.
+##
+## Falls through to the full install below whenever it cannot do that safely.
+
+A3M_REQUEST_FILE="/mnt/server/.arma3-manager/request.json"
+A3M_SCRIPT_REF="${A3M_SCRIPT_REF:-main}"
+A3M_SCRIPT_BASE="https://raw.githubusercontent.com/FyWolf/arma3-manager-egg/${A3M_SCRIPT_REF}/image"
+
+if [[ -f ${A3M_REQUEST_FILE} ]] \\
+    && { [[ -f /mnt/server/arma3server_x64 ]] || [[ -f /mnt/server/arma3server ]]; } \\
+    && [[ -f /mnt/server/steamcmd/steamcmd.sh ]]; then
+
+    echo -e "\\n[A3M]: A mod download was requested and the game is already installed."
+    echo -e "[A3M]: Fetching only the requested mods. The game files are not touched.\\n"
+
+    apt -y update > /dev/null 2>&1
+    apt -y --no-install-recommends install curl ca-certificates jq > /dev/null 2>&1
+
+    cd /mnt/server || exit 0
+    export HOME=/mnt/server
+
+    if curl -sSLf -o /tmp/a3m-common.sh "${A3M_SCRIPT_BASE}/a3m-common.sh" \\
+        && curl -sSLf -o /tmp/a3m-sync.sh "${A3M_SCRIPT_BASE}/a3m-sync.sh"; then
+
+        chmod +x /tmp/a3m-sync.sh
+        A3M_COMMON=/tmp/a3m-common.sh bash /tmp/a3m-sync.sh once
+
+        echo -e "\\n[A3M]: Mod download finished. The server can be started.\\n"
+
+        # Exit 0 even if individual mods failed. A non-zero exit here marks the
+        # whole server as install-failed in the panel, which is a far worse
+        # state than one mod missing — and the per-mod reasons are already in
+        # status.json, where the Mods page shows them on the row that failed.
+        exit 0
+    fi
+
+    # The request is deliberately left in place. The sync daemon picks it up the
+    # next time the server starts, so the mods still arrive; they arrive later.
+    # Exiting non-zero here would flag the server as broken over a failed
+    # download of two shell scripts.
+    echo -e "\\n[A3M]: Could not fetch the sync scripts from GitHub."
+    echo -e "[A3M]: The request has been left queued and will run at the next server start.\\n"
+    exit 0
+fi
+
+## A3M === END FAST PATH — upstream's install script follows, unmodified ===
+
+'''
 
 
 def main() -> int:
@@ -119,6 +239,18 @@ def main() -> int:
         if tag not in tags:
             tags.append(tag)
     egg["tags"] = tags
+
+    # Prepend the mods-only fast path to upstream's install script.
+    #
+    # Upstream's script keeps its own shebang, which becomes a harmless comment
+    # once it is no longer on the first line; stripping it would make the diff
+    # against upstream larger than the change actually is.
+    script = egg["scripts"]["installation"]["script"]
+
+    if "A3M === MODS-ONLY FAST PATH" in script:
+        raise SystemExit("Upstream script already carries the fast path — reconcile before regenerating.")
+
+    egg["scripts"]["installation"]["script"] = A3M_INSTALL_PREFIX + script
 
     existing = {v.get("env_variable") for v in egg.get("variables", [])}
     highest = max((v.get("sort") or 0) for v in egg.get("variables", [])) if egg.get("variables") else 0

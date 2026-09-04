@@ -24,16 +24,22 @@ jobs:
         run: jq --version
 
       - name: Shell syntax
-        run: bash -n image/entrypoint.sh
+        run: |
+          bash -n image/entrypoint.sh
+          bash -n image/a3m-common.sh
+          bash -n image/a3m-sync.sh
 
       - name: Status file assertions
         run: bash tests/status-json.sh
+
+      - name: Background sync assertions
+        run: bash tests/sync.sh
 
       # A shellcheck failure is advisory: the file is mostly upstream's and
       # carries its own style. New A3M code should still be clean.
       - name: ShellCheck (advisory)
         continue-on-error: true
-        run: shellcheck -S warning image/entrypoint.sh tests/status-json.sh || true
+        run: shellcheck -S warning image/*.sh tests/*.sh || true
 
   egg:
     name: Egg
@@ -59,6 +65,23 @@ jobs:
             exit 1
           fi
 
+      # The install script is what runs when a customer presses Reinstall. A
+      # syntax error there is not a failed feature, it is a server that cannot
+      # be installed — and it would only surface on someone's live panel.
+      - name: The generated install script is valid bash
+        # `tr -d '\r'` reproduces what Wings does before running this. Upstream's
+        # script is stored with CRLF endings, and Wings normalises it on the way
+        # to disk:
+        #
+        #     strings.ReplaceAll(ip.Script.Script, "\r\n", "\n")
+        #
+        # Without that here, bash chokes on `fi\r` and this step fails on a
+        # script that runs perfectly in production — testing a file Wings never
+        # writes.
+        run: |
+          jq -r '.scripts.installation.script' egg-arma3-manager.json | tr -d '\r' > /tmp/install.sh
+          bash -n /tmp/install.sh
+
       - name: The egg is valid JSON and declares what the panel needs
         run: |
           python - <<'PY'
@@ -83,7 +106,8 @@ jobs:
           if len(names) != len(set(names)):
               problems.append('duplicate env_variable in variables')
 
-          for wanted in ('A3M_SYNC_ONLY', 'A3M_POLL_INTERVAL', 'A3M_DISABLE'):
+          for wanted in ('A3M_SYNC_ONLY', 'A3M_POLL_INTERVAL', 'A3M_DISABLE',
+                         'A3M_BACKGROUND_SYNC', 'A3M_SYNC_POLL', 'A3M_SYNC_NICE'):
               if wanted not in names:
                   problems.append('missing added variable: %s' % wanted)
 

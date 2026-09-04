@@ -31,7 +31,7 @@
     },
     "scripts": {
         "installation": {
-            "script": "#!/bin/bash\r\n\r\n## File: Pelican Arma 3 Egg - egg-arma3.json\r\n## Author: David Wolfe (Red-Thirten)\r\n## Date: 2025/10/06\r\n## License: MIT License\r\n## Image to install with is 'ghcr.io/parkervcp/installers:debian'\r\n\r\n# Download URL for a default Arma 3 server.cfg\r\n# (Feel free to modify to your own preferred, self-hosted file if you wish)\r\nSERVER_CFG_URL=\"https://raw.githubusercontent.com/pelican-eggs/games-steamcmd/main/arma/arma3/egg-arma3-config/server.cfg\"\r\n\r\n# Install packages. Default packages below are skipped if using image noted above, thus speeding up the install process.\r\napt -y update\r\napt -y --no-install-recommends install curl lib32gcc-s1 ca-certificates\r\n\r\n# Check for valid Steam credentials to download Arma 3 with (requires valid Steam account)\r\nif [[ \"${STEAM_USER}\" == \"\" ]] || [[ \"${STEAM_USER}\" == \"anonymous\" ]] || [[ \"${STEAM_PASS}\" == \"\" ]]; then\r\n    echo -e \"INSTALLATION ERROR: A valid REAL Steam account is required to download the Arma 3 Dedicated Server.\"\r\n    echo -e \"\\t(\\\"anonymous\\\" account cannot be used. Game ownership is not required.)\"\r\n    exit 1\r\nfi\r\n\r\n# Download and install SteamCMD\r\ncd /tmp\r\nmkdir -p /mnt/server/steamcmd /mnt/server/steamapps\r\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\r\ntar -xzvf steamcmd.tar.gz -C /mnt/server/steamcmd\r\ncd /mnt/server/steamcmd\r\n\r\n# SteamCMD fails otherwise for some reason, even running as root.\r\nchown -R root:root /mnt\r\nexport HOME=/mnt/server\r\n\r\n# Install game server using SteamCMD\r\necho -e \"\\nInstalling/Validating Arma 3 Dedicated Server Files...\"\r\necho -e \"(It is okay to ignore any \\\"SDL\\\", \\\"steamservice\\\", and \\\"thread priority\\\" errors during this process)\"\r\nif [[ -n ${STEAMCMD_BETAID} ]]; then\r\n    echo -e \"\\tDownload/Update of \\\"${STEAMCMD_BETAID}\\\" branch enabled.\"\r\nfi\r\necho -e \"\"\r\n./steamcmd.sh +force_install_dir /mnt/server \"+login \\\"${STEAM_USER}\\\" \\\"${STEAM_PASS}\\\"\" +app_update ${STEAMCMD_APPID} $( [[ -n ${STEAMCMD_BETAID} ]] && printf %s \"-beta ${STEAMCMD_BETAID}\" ) validate +quit\r\n\r\n# Set up 32 and 64 bit libraries\r\nmkdir -p /mnt/server/.steam/sdk{32,64}\r\ncp -v linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\r\ncp -v linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\r\n\r\n# Arma 3 setup\r\ncd /mnt/server/\r\n[[ -f server.cfg ]] || curl -sSLO ${SERVER_CFG_URL} # Download default server.cfg file\r\n[[ -f basic.cfg ]] || curl -sSLO ${BASIC_CFG_URL} # Download default basic.cfg file\r\nchmod 644 server.cfg basic.cfg\r\nmkdir -p ./battleye/launch # Create BattlEye config files\r\ntee ./battleye/launch/beserver.cfg ./battleye/launch/beserver_x64.cfg > /dev/null <<EOF\r\nRConPassword $RCON_PASSWORD\r\nRConPort $RCON_PORT\r\nEOF\r\n\r\nif [[ -f \"arma3server_x64\" && -f \"server.cfg\" && -f \"basic.cfg\" ]]; then\r\n    echo -e \"\\nArma 3 Dedicated Server successfully installed!\\n\"\r\nelse\r\n    echo -e \"\\n\\nFailed to install the Arma 3 Dedicated Server!\"\r\n    echo -e \"\\tReview the installation logs for any errors before trying again.\\n\"\r\n    exit 1\r\nfi",
+            "script": "#!/bin/bash\n\n## A3M === MODS-ONLY FAST PATH ===\n##\n## Runs when the panel has left a download request on the volume and the game is\n## already installed. Fetches only the requested Workshop mods and exits, instead\n## of re-validating twenty-odd gigabytes of game files nobody asked about.\n##\n## Falls through to the full install below whenever it cannot do that safely.\n\nA3M_REQUEST_FILE=\"/mnt/server/.arma3-manager/request.json\"\nA3M_SCRIPT_REF=\"${A3M_SCRIPT_REF:-main}\"\nA3M_SCRIPT_BASE=\"https://raw.githubusercontent.com/FyWolf/arma3-manager-egg/${A3M_SCRIPT_REF}/image\"\n\nif [[ -f ${A3M_REQUEST_FILE} ]] \\\n    && { [[ -f /mnt/server/arma3server_x64 ]] || [[ -f /mnt/server/arma3server ]]; } \\\n    && [[ -f /mnt/server/steamcmd/steamcmd.sh ]]; then\n\n    echo -e \"\\n[A3M]: A mod download was requested and the game is already installed.\"\n    echo -e \"[A3M]: Fetching only the requested mods. The game files are not touched.\\n\"\n\n    apt -y update > /dev/null 2>&1\n    apt -y --no-install-recommends install curl ca-certificates jq > /dev/null 2>&1\n\n    cd /mnt/server || exit 0\n    export HOME=/mnt/server\n\n    if curl -sSLf -o /tmp/a3m-common.sh \"${A3M_SCRIPT_BASE}/a3m-common.sh\" \\\n        && curl -sSLf -o /tmp/a3m-sync.sh \"${A3M_SCRIPT_BASE}/a3m-sync.sh\"; then\n\n        chmod +x /tmp/a3m-sync.sh\n        A3M_COMMON=/tmp/a3m-common.sh bash /tmp/a3m-sync.sh once\n\n        echo -e \"\\n[A3M]: Mod download finished. The server can be started.\\n\"\n\n        # Exit 0 even if individual mods failed. A non-zero exit here marks the\n        # whole server as install-failed in the panel, which is a far worse\n        # state than one mod missing — and the per-mod reasons are already in\n        # status.json, where the Mods page shows them on the row that failed.\n        exit 0\n    fi\n\n    # The request is deliberately left in place. The sync daemon picks it up the\n    # next time the server starts, so the mods still arrive; they arrive later.\n    # Exiting non-zero here would flag the server as broken over a failed\n    # download of two shell scripts.\n    echo -e \"\\n[A3M]: Could not fetch the sync scripts from GitHub.\"\n    echo -e \"[A3M]: The request has been left queued and will run at the next server start.\\n\"\n    exit 0\nfi\n\n## A3M === END FAST PATH — upstream's install script follows, unmodified ===\n\n#!/bin/bash\r\n\r\n## File: Pelican Arma 3 Egg - egg-arma3.json\r\n## Author: David Wolfe (Red-Thirten)\r\n## Date: 2025/10/06\r\n## License: MIT License\r\n## Image to install with is 'ghcr.io/parkervcp/installers:debian'\r\n\r\n# Download URL for a default Arma 3 server.cfg\r\n# (Feel free to modify to your own preferred, self-hosted file if you wish)\r\nSERVER_CFG_URL=\"https://raw.githubusercontent.com/pelican-eggs/games-steamcmd/main/arma/arma3/egg-arma3-config/server.cfg\"\r\n\r\n# Install packages. Default packages below are skipped if using image noted above, thus speeding up the install process.\r\napt -y update\r\napt -y --no-install-recommends install curl lib32gcc-s1 ca-certificates\r\n\r\n# Check for valid Steam credentials to download Arma 3 with (requires valid Steam account)\r\nif [[ \"${STEAM_USER}\" == \"\" ]] || [[ \"${STEAM_USER}\" == \"anonymous\" ]] || [[ \"${STEAM_PASS}\" == \"\" ]]; then\r\n    echo -e \"INSTALLATION ERROR: A valid REAL Steam account is required to download the Arma 3 Dedicated Server.\"\r\n    echo -e \"\\t(\\\"anonymous\\\" account cannot be used. Game ownership is not required.)\"\r\n    exit 1\r\nfi\r\n\r\n# Download and install SteamCMD\r\ncd /tmp\r\nmkdir -p /mnt/server/steamcmd /mnt/server/steamapps\r\ncurl -sSL -o steamcmd.tar.gz https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz\r\ntar -xzvf steamcmd.tar.gz -C /mnt/server/steamcmd\r\ncd /mnt/server/steamcmd\r\n\r\n# SteamCMD fails otherwise for some reason, even running as root.\r\nchown -R root:root /mnt\r\nexport HOME=/mnt/server\r\n\r\n# Install game server using SteamCMD\r\necho -e \"\\nInstalling/Validating Arma 3 Dedicated Server Files...\"\r\necho -e \"(It is okay to ignore any \\\"SDL\\\", \\\"steamservice\\\", and \\\"thread priority\\\" errors during this process)\"\r\nif [[ -n ${STEAMCMD_BETAID} ]]; then\r\n    echo -e \"\\tDownload/Update of \\\"${STEAMCMD_BETAID}\\\" branch enabled.\"\r\nfi\r\necho -e \"\"\r\n./steamcmd.sh +force_install_dir /mnt/server \"+login \\\"${STEAM_USER}\\\" \\\"${STEAM_PASS}\\\"\" +app_update ${STEAMCMD_APPID} $( [[ -n ${STEAMCMD_BETAID} ]] && printf %s \"-beta ${STEAMCMD_BETAID}\" ) validate +quit\r\n\r\n# Set up 32 and 64 bit libraries\r\nmkdir -p /mnt/server/.steam/sdk{32,64}\r\ncp -v linux32/steamclient.so /mnt/server/.steam/sdk32/steamclient.so\r\ncp -v linux64/steamclient.so /mnt/server/.steam/sdk64/steamclient.so\r\n\r\n# Arma 3 setup\r\ncd /mnt/server/\r\n[[ -f server.cfg ]] || curl -sSLO ${SERVER_CFG_URL} # Download default server.cfg file\r\n[[ -f basic.cfg ]] || curl -sSLO ${BASIC_CFG_URL} # Download default basic.cfg file\r\nchmod 644 server.cfg basic.cfg\r\nmkdir -p ./battleye/launch # Create BattlEye config files\r\ntee ./battleye/launch/beserver.cfg ./battleye/launch/beserver_x64.cfg > /dev/null <<EOF\r\nRConPassword $RCON_PASSWORD\r\nRConPort $RCON_PORT\r\nEOF\r\n\r\nif [[ -f \"arma3server_x64\" && -f \"server.cfg\" && -f \"basic.cfg\" ]]; then\r\n    echo -e \"\\nArma 3 Dedicated Server successfully installed!\\n\"\r\nelse\r\n    echo -e \"\\n\\nFailed to install the Arma 3 Dedicated Server!\"\r\n    echo -e \"\\tReview the installation logs for any errors before trying again.\\n\"\r\n    exit 1\r\nfi",
             "container": "ghcr.io/parkervcp/installers:debian",
             "entrypoint": "/bin/bash"
         }
@@ -374,6 +374,47 @@
             "sort": 26
         },
         {
+            "name": "[A3M] Background Mod Downloads",
+            "description": "Runs a mod downloader alongside the game server, so mods can be fetched at any time from the panel without stopping or restarting anything.\n\nDownloads go into the SteamCMD cache. The mods themselves are activated at the next restart, because Arma reads its mod list once at startup and there is no way around that — but the restart is then instant instead of waiting for a download.\n\nTurn this off to get the stock behaviour, where mods are only ever fetched while the server boots. (1 Enable | 0 Disable)",
+            "env_variable": "A3M_BACKGROUND_SYNC",
+            "default_value": "1",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": [
+                "required",
+                "boolean"
+            ],
+            "sort": 27
+        },
+        {
+            "name": "[A3M] Background Sync Check Interval",
+            "description": "Seconds between checks for a download request from the panel. This is a cheap check for one file, so a short interval costs almost nothing — it mostly decides how quickly a customer sees their download start.",
+            "env_variable": "A3M_SYNC_POLL",
+            "default_value": "10",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": [
+                "required",
+                "integer",
+                "between:2,600"
+            ],
+            "sort": 28
+        },
+        {
+            "name": "[A3M] Background Sync Priority",
+            "description": "How far the background downloader yields to the game server, as a `nice` value from 0 (equal footing) to 19 (only spare capacity).\n\nArma is latency sensitive in a way a download is not, so the default leans well away from the game. A background sync that costs the players their tickrate is not a background sync.",
+            "env_variable": "A3M_SYNC_NICE",
+            "default_value": "10",
+            "user_viewable": true,
+            "user_editable": false,
+            "rules": [
+                "required",
+                "integer",
+                "between:0,19"
+            ],
+            "sort": 29
+        },
+        {
             "name": "[A3M] Progress Poll Interval",
             "description": "Seconds between rewrites of .arma3-manager/status.json while mods download. Each rewrite measures the size of the mod currently transferring, which is a directory walk — so a very short interval costs disk I/O on a busy node and buys a smoother bar and nothing else.",
             "env_variable": "A3M_POLL_INTERVAL",
@@ -385,7 +426,7 @@
                 "integer",
                 "between:1,120"
             ],
-            "sort": 27
+            "sort": 30
         },
         {
             "name": "[A3M] Disable Progress Reporting",
@@ -398,7 +439,7 @@
                 "required",
                 "boolean"
             ],
-            "sort": 28
+            "sort": 31
         }
     ]
 }

@@ -83,6 +83,65 @@ the panel last looked is larger than its recorded size.
 across the whole download, because the sizes of mods that have not started are
 only as good as `wanted.json`.
 
+## Background downloads
+
+**This is the feature the fork exists for.** Mods download while the server runs,
+on request, with no restart and no stop.
+
+Upstream fetches mods in the entrypoint, *before* the game binary launches. So
+every mod change costs a restart, and every restart costs however long the
+download takes — on a 40 GB set that is the session, not an inconvenience.
+
+Here, `a3m-sync.sh` runs alongside the game. The panel writes
+`.arma3-manager/request.json` at any time; the daemon picks it up within
+`A3M_SYNC_POLL` seconds and downloads into the SteamCMD cache while players carry
+on playing, reporting through the same `status.json` as a boot-time download.
+
+```
+panel writes request.json  ──►  daemon claims it (request.active.json)
+                                     │
+                                     ├── downloads into Steam/steamapps/workshop/content/
+                                     ├── writes status.json every few seconds
+                                     └── logs to the console and .arma3-manager/sync.log
+```
+
+### What it deliberately does not do
+
+**It does not build the `@<id>` folders.** Those are what the running server has
+open, and the entrypoint's linking step starts with `rm -rf @<id>` — doing that
+underneath a live Arma is how you corrupt a session.
+
+There is nothing to gain by it either: **Arma reads its mod list once, at
+startup**, so a mod linked now could not be loaded before the next restart
+regardless. The next boot links it, and because the files are already cached that
+step is a hard-link copy rather than a download.
+
+So this makes the **download** asynchronous. Activation is still a restart —
+Arma gives no other option — but the restart is as fast as one with no mod
+changes at all, which is the whole point.
+
+### The parts that stop it eating the server
+
+- **`nice`** (`A3M_SYNC_NICE`, default 10). Arma is latency sensitive in a way a
+  download is not. A background sync that costs the players their tickrate is not
+  a background sync.
+- **It starts after the boot update finishes**, never beside it. Two SteamCMD
+  processes against one Steam account and one workshop directory is a race over
+  the same files, and the loser looks like a corrupt mod.
+- **A lock** (`mkdir`, which is atomic) so two requests cannot overlap. A lock
+  older than two hours is assumed to belong to a container that was killed
+  mid-download and is broken open — otherwise one `docker kill` at the wrong
+  moment disables background sync permanently.
+- **It is killed with the server.** Without that the daemon survives as an orphan
+  and the next start has two of them polling the same file.
+- **A request is claimed by renaming it**, so the panel can queue a new one while
+  the current one runs.
+
+### When the server is off
+
+Nothing runs, because there is no container. Two options then: start the server
+normally, or use `A3M_SYNC_ONLY` below to download without bringing the game up.
+
 ## Sync without starting the server
 
 Set `A3M_SYNC_ONLY=1`. The container downloads and updates every mod, writes the
@@ -121,6 +180,9 @@ The image is published to `ghcr.io/fywolf/arma3-manager-egg:latest`.
 | Variable | Default | Editable by customer | What it does |
 |---|---|---|---|
 | `A3M_SYNC_ONLY` | `0` | yes | Download mods, then exit without starting the server |
+| `A3M_BACKGROUND_SYNC` | `1` | no | Run the downloader alongside the server |
+| `A3M_SYNC_POLL` | `10` | no | Seconds between checks for a download request |
+| `A3M_SYNC_NICE` | `10` | no | How far the downloader yields to the game (`nice`, 0–19) |
 | `A3M_POLL_INTERVAL` | `5` | no | Seconds between progress rewrites |
 | `A3M_DISABLE` | `0` | no | Stop writing `status.json` entirely |
 
@@ -135,24 +197,35 @@ to directory probing.
 ## Developing
 
 ```bash
-bash tests/status-json.sh    # 30 assertions, no container needed
-python build-egg.py          # regenerate the egg from upstream
-bash -n image/entrypoint.sh  # syntax
+bash tests/status-json.sh              # 30 assertions on the status file
+bash tests/sync.sh                     # 28 assertions on the background daemon
+python build-egg.py                    # regenerate the egg from upstream
+bash -n image/{entrypoint,a3m-common,a3m-sync}.sh
 ```
 
-`tests/status-json.sh` extracts the `A3M` functions out of the entrypoint and
-runs them against a fake server directory with real files, so the byte counts and
-percentages are measured rather than mocked. It needs `jq`, which the entrypoint
-needs too.
+Neither test needs a container. `tests/status-json.sh` sources `a3m-common.sh`
+and runs it against a fake server directory with real files, so byte counts and
+percentages are measured rather than mocked. `tests/sync.sh` goes further and
+runs the real `ProcessRequest` against a **fake SteamCMD** — a stub that creates
+or refuses to create the content directory — because the interesting failures are
+in the wiring: a request claimed but never released, a lock that outlives its
+process, a download that "succeeds" while fetching nothing. Stubbing
+`DownloadOne` would catch none of those.
+
+Both need `jq`, which the image needs too.
 
 **Run it before building an image.** The status file is the only thing the panel
 reads, and every way it can be wrong is silent — a malformed document, a missed
 transition or a bad percentage all leave the download working perfectly and the
 page reporting nonsense, with no error anywhere.
 
-Two bugs it caught the first time it ran, both of which read fine in the source:
-seeding parsed a semicolon-separated list as one token and silently tracked
-nothing, and the optional error argument aborted the script under `set -u`.
+Four bugs these caught, every one of which reads fine in the source: seeding
+parsed a semicolon-separated list as one token and tracked nothing; the optional
+error argument aborted the script under `set -u`; `A3M_DAEMON_RUNNING` was read
+before it was ever set, which would abort any egg that does not declare every
+variable; and a **carriage return** in an id — from a Windows-pasted egg variable
+— made it fail `^[0-9]+$` and be dropped silently, invisible in every log because
+a CR just moves the cursor.
 
 ### Pulling a newer upstream
 

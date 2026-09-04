@@ -2,7 +2,7 @@
 
 # Arma 3 Manager Egg — status.json tests
 #
-# Exercises the A3M functions from image/entrypoint.sh against a fake server
+# Exercises the A3M functions from image/a3m-common.sh against a fake server
 # directory, with no container, no SteamCMD and no panel.
 #
 # ## Why these exist
@@ -37,23 +37,15 @@ function check { #[Input: string label; string actual; string expected]
 
 # --- Load the functions under test -------------------------------------------
 #
-# Extracted rather than sourced: entrypoint.sh is a script, not a library, and
-# sourcing it would run a server. The markers are stable because they are the
-# section headers this fork adds.
+# Sourced directly. These used to be carved out of entrypoint.sh with sed, which
+# worked but pinned the test to a comment header; now they live in a library
+# precisely so both the entrypoint and the sync daemon can share them, and a
+# library is a thing a test can just source.
 
-ENTRYPOINT="$(dirname "$0")/../image/entrypoint.sh"
+FUNCS="$(cd "$(dirname "$0")/../image" && pwd)/a3m-common.sh"
 
-if [[ ! -f ${ENTRYPOINT} ]]; then
-    echo "Cannot find ${ENTRYPOINT}"
-    exit 1
-fi
-
-FUNCS="$(mktemp)"
-sed -n '/^## A3M === ARMA 3 MANAGER PROGRESS REPORTING ===$/,/^# Runs SteamCMD with specified variables/p' \
-    "${ENTRYPOINT}" | head -n -1 > "${FUNCS}"
-
-if [[ ! -s ${FUNCS} ]]; then
-    echo "Extracted no functions from ${ENTRYPOINT} — did the section header change?"
+if [[ ! -f ${FUNCS} ]]; then
+    echo "Cannot find ${FUNCS}"
     exit 1
 fi
 
@@ -65,7 +57,7 @@ fi
 # --- Fake server root ---------------------------------------------------------
 
 WORK="$(mktemp -d)"
-trap 'rm -rf "${WORK}" "${FUNCS}"' EXIT
+trap 'rm -rf "${WORK}"' EXIT
 cd "${WORK}" || exit 1
 
 # The constants the functions close over, matching the entrypoint's own.

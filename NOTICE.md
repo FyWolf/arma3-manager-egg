@@ -27,11 +27,26 @@ Modifications, © 2026 FyWolf. Every one of them is marked in-file with `A3M`:
    works, so a large mod shows a moving percentage.
 4. **`A3M_SYNC_ONLY`.** When set, mods are downloaded and updated and the script
    exits 0 without starting the game server.
-5. **Header comment** recording the fork and pointing here.
+5. **A background sync daemon** is started alongside the game server and killed
+   with it, so mods can be downloaded at any time without a restart.
+6. **The A3M functions were moved** into `a3m-common.sh`, which the entrypoint
+   sources, so the daemon and the boot-time download report identically.
+7. **Header comment** recording the fork and pointing here.
 
 Nothing else is changed. The SteamCMD invocation, retry and error handling, mod
 linking, key handling, lowercase repair, headless clients, parameter file
 generation and the server launch are upstream's and are untouched.
+
+## `image/a3m-common.sh` and `image/a3m-sync.sh`
+
+New files, © 2026 FyWolf, AGPL-3.0-or-later.
+
+`a3m-common.sh` holds the progress-reporting functions lifted out of the forked
+entrypoint, so that the entrypoint and the sync daemon share one implementation.
+`a3m-sync.sh` is entirely new: a background downloader that watches for a request
+file written by the panel and fetches Workshop items while the server runs.
+
+Neither contains upstream code beyond the functions noted above.
 
 ## `image/Dockerfile`
 
@@ -39,7 +54,8 @@ Derived from `games/arma3/Dockerfile` in the same repository, AGPL-3.0-or-later.
 
 Modifications: `jq` added to the installed packages (the entrypoint requires it);
 `apt` lists cleaned up in the same layer; image labels repointed at this
-repository.
+repository; `a3m-common.sh` and `a3m-sync.sh` copied in alongside the
+entrypoint.
 
 ## `image/passwd.template`
 

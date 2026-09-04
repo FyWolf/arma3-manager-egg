@@ -48,6 +48,49 @@ ADDED = [
         ("rules", ["required", "boolean"]),
     ]),
     OrderedDict([
+        ("name", "[A3M] Background Mod Downloads"),
+        ("description",
+         "Runs a mod downloader alongside the game server, so mods can be fetched at "
+         "any time from the panel without stopping or restarting anything.\n\n"
+         "Downloads go into the SteamCMD cache. The mods themselves are activated at "
+         "the next restart, because Arma reads its mod list once at startup and there "
+         "is no way around that — but the restart is then instant instead of waiting "
+         "for a download.\n\n"
+         "Turn this off to get the stock behaviour, where mods are only ever fetched "
+         "while the server boots. (1 Enable | 0 Disable)"),
+        ("env_variable", "A3M_BACKGROUND_SYNC"),
+        ("default_value", "1"),
+        ("user_viewable", True),
+        ("user_editable", False),
+        ("rules", ["required", "boolean"]),
+    ]),
+    OrderedDict([
+        ("name", "[A3M] Background Sync Check Interval"),
+        ("description",
+         "Seconds between checks for a download request from the panel. This is a "
+         "cheap check for one file, so a short interval costs almost nothing — it "
+         "mostly decides how quickly a customer sees their download start."),
+        ("env_variable", "A3M_SYNC_POLL"),
+        ("default_value", "10"),
+        ("user_viewable", True),
+        ("user_editable", False),
+        ("rules", ["required", "integer", "between:2,600"]),
+    ]),
+    OrderedDict([
+        ("name", "[A3M] Background Sync Priority"),
+        ("description",
+         "How far the background downloader yields to the game server, as a `nice` "
+         "value from 0 (equal footing) to 19 (only spare capacity).\n\n"
+         "Arma is latency sensitive in a way a download is not, so the default leans "
+         "well away from the game. A background sync that costs the players their "
+         "tickrate is not a background sync."),
+        ("env_variable", "A3M_SYNC_NICE"),
+        ("default_value", "10"),
+        ("user_viewable", True),
+        ("user_editable", False),
+        ("rules", ["required", "integer", "between:0,19"]),
+    ]),
+    OrderedDict([
         ("name", "[A3M] Progress Poll Interval"),
         ("description",
          "Seconds between rewrites of .arma3-manager/status.json while mods download. "

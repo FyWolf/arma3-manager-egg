@@ -139,8 +139,42 @@ changes at all, which is the whole point.
 
 ### When the server is off
 
-Nothing runs, because there is no container. Two options then: start the server
-normally, or use `A3M_SYNC_ONLY` below to download without bringing the game up.
+The daemon only exists while the server does, so with the server stopped there is
+no container to ask. The egg handles that case too, through the one Wings API
+that starts a container against a stopped server's volume: **reinstall**.
+
+Wings waits for the server to be offline, mounts the volume at `/mnt/server`, and
+runs this egg's install script — and its own comment on that function is the
+guarantee the whole thing rests on:
+
+> Reinstall reinstalls a server's software by utilizing the installation script
+> for the server egg. **This does not touch any existing files for the server,
+> other than what the script modifies.**
+
+So the install script carries a **mods-only fast path**. When it finds a pending
+`request.json` and an already-installed game, it fetches just those mods and
+exits, instead of re-validating twenty-odd gigabytes of game files nobody asked
+about. It is a download that happens to be spelled "reinstall".
+
+The panel triggers this automatically when it sees the server is offline, so
+**Download now** behaves the same either way — the only visible difference is
+that the server shows as *Installing* for the duration.
+
+The fast path does the real work by fetching `a3m-common.sh` and `a3m-sync.sh`
+and running `a3m-sync.sh once`, rather than reimplementing the download loop. The
+installer image is upstream's Debian one, running as root, which the game image
+is not — so the scripts cannot simply be baked in. Reimplementing them inline was
+the alternative and is the wrong one: the panel reads `status.json`, and a second
+implementation of it would drift from the daemon's while continuing to parse.
+
+It **never exits non-zero.** A failed install marks the whole server broken in
+the panel, which is a far worse state than one mod missing — and the per-mod
+reasons are already in `status.json`. If the scripts cannot be fetched at all,
+the request is left queued and the next server start picks it up.
+
+This makes `A3M_SYNC_ONLY` largely redundant: it exists for the same job but
+requires the customer to set a variable and remember to unset it, or the server
+never starts again.
 
 ## Sync without starting the server
 

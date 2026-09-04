@@ -73,8 +73,12 @@ identity (name, author, uuid, description, tags), repoints `docker_images` at
 this repository's image, and appends three variables — `A3M_SYNC_ONLY`,
 `A3M_POLL_INTERVAL` and `A3M_DISABLE`.
 
-The install script, the config-file parsers, the startup command and all
-twenty-five upstream variables are passed through unchanged; `build-egg.py`
+It also **prepends a mods-only fast path to the install script**. Upstream's
+script is preserved verbatim below it and still runs whenever the fast path does
+not apply; the transform refuses if upstream ever gains a marker of its own.
+
+The config-file parsers, the startup command, the installer container image and
+all twenty-five upstream variables are passed through unchanged; `build-egg.py`
 fails rather than overwrite an upstream variable that gains one of these names.
 
 `upstream-egg-arma3.json` is a verbatim copy of the source document, kept so the

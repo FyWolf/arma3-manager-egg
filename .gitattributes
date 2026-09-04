@@ -1,0 +1,22 @@
+# Everything in this repository runs inside a Linux container, so everything in
+# it is checked out with LF endings regardless of the host committing it.
+#
+# This is not tidiness. A shell script with CRLF endings fails inside the image
+# in a way that reads as nonsense: the kernel takes `#!/bin/bash\r` literally and
+# reports "no such file or directory" naming an interpreter that plainly exists,
+# and any line that survives that carries a stray \r into every variable it sets.
+# The repository is authored on Windows, where git's default would introduce
+# exactly that on checkout.
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.py    text eol=lf
+*.json  text eol=lf
+*.yml   text eol=lf
+*.md    text eol=lf
+
+Dockerfile       text eol=lf
+passwd.template  text eol=lf
+
+LICENSE text eol=lf

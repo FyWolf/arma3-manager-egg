@@ -1,0 +1,100 @@
+name: CI
+
+# Runs on every push and pull request. The image build is a separate workflow, so
+# a broken status file can never reach a published tag.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Entrypoint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # jq is what the entrypoint writes status.json with, so the tests need the
+      # same tool the container has. It is preinstalled on ubuntu-latest; the
+      # check is here so a runner image that drops it fails loudly rather than
+      # skipping every assertion.
+      - name: Check jq is present
+        run: jq --version
+
+      - name: Shell syntax
+        run: bash -n image/entrypoint.sh
+
+      - name: Status file assertions
+        run: bash tests/status-json.sh
+
+      # A shellcheck failure is advisory: the file is mostly upstream's and
+      # carries its own style. New A3M code should still be clean.
+      - name: ShellCheck (advisory)
+        continue-on-error: true
+        run: shellcheck -S warning image/entrypoint.sh tests/status-json.sh || true
+
+  egg:
+    name: Egg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: The committed egg matches what build-egg.py generates
+        # The egg is a derived file. A hand edit would be silently overwritten by
+        # the next regeneration, so it is rejected here instead — this is the
+        # check that keeps "generated, not edited" true rather than aspirational.
+        run: |
+          cp egg-arma3-manager.json /tmp/committed.json
+          python build-egg.py
+          if ! diff -u /tmp/committed.json egg-arma3-manager.json; then
+            echo ""
+            echo "::error::egg-arma3-manager.json is not what build-egg.py produces."
+            echo "Edit build-egg.py and regenerate; do not edit the egg by hand."
+            exit 1
+          fi
+
+      - name: The egg is valid JSON and declares what the panel needs
+        run: |
+          python - <<'PY'
+          import json, uuid, sys
+
+          with open('egg-arma3-manager.json', encoding='utf-8') as handle:
+              egg = json.load(handle)
+
+          problems = []
+
+          for key in ('name', 'author', 'uuid', 'description', 'docker_images',
+                      'startup', 'config', 'scripts', 'variables'):
+              if not egg.get(key):
+                  problems.append('missing or empty: %s' % key)
+
+          try:
+              uuid.UUID(egg['uuid'])
+          except Exception as error:
+              problems.append('uuid is not a uuid: %s' % error)
+
+          names = [v.get('env_variable') for v in egg['variables']]
+          if len(names) != len(set(names)):
+              problems.append('duplicate env_variable in variables')
+
+          for wanted in ('A3M_SYNC_ONLY', 'A3M_POLL_INTERVAL', 'A3M_DISABLE'):
+              if wanted not in names:
+                  problems.append('missing added variable: %s' % wanted)
+
+          # The whole point of the fork. If the image is still upstream's, the
+          # entrypoint in it has none of this and status.json is never written.
+          if 'arma3-manager-egg' not in json.dumps(egg['docker_images']):
+              problems.append('docker_images does not point at this repo\'s image')
+
+          if problems:
+              print('\n'.join('  - ' + p for p in problems))
+              sys.exit(1)
+
+          print('egg ok: %d variables, image %s' % (len(names), egg['docker_images']))
+          PY

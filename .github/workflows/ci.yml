@@ -69,8 +69,17 @@ jobs:
       # syntax error there is not a failed feature, it is a server that cannot
       # be installed — and it would only surface on someone's live panel.
       - name: The generated install script is valid bash
+        # `tr -d '\r'` reproduces what Wings does before running this. Upstream's
+        # script is stored with CRLF endings, and Wings normalises it on the way
+        # to disk:
+        #
+        #     strings.ReplaceAll(ip.Script.Script, "\r\n", "\n")
+        #
+        # Without that here, bash chokes on `fi\r` and this step fails on a
+        # script that runs perfectly in production — testing a file Wings never
+        # writes.
         run: |
-          jq -r '.scripts.installation.script' egg-arma3-manager.json > /tmp/install.sh
+          jq -r '.scripts.installation.script' egg-arma3-manager.json | tr -d '\r' > /tmp/install.sh
           bash -n /tmp/install.sh
 
       - name: The egg is valid JSON and declares what the panel needs

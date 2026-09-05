@@ -68,7 +68,6 @@ A3M_WANTED="${A3M_DIR}/wanted.json"
 A3M_POLL=5
 A3M_MONITOR_PID=""
 A3M_DISABLE=""
-A3M_SYNC_ONLY=""
 WORKSHOP_DIR="./Steam/steamapps/workshop"
 GAME_ID=107410
 
@@ -198,11 +197,9 @@ A3M_Phase "running"
 echo ""
 echo "Phases:"
 check 'phase is written through' "$(jq -r '.phase' "${A3M_STATUS}")" 'running'
-check 'sync_only is false when unset' "$(jq -r '.sync_only' "${A3M_STATUS}")" 'false'
-
-A3M_SYNC_ONLY=1
+# `synced` is the daemon's terminal phase after a background download.
 A3M_Phase "synced"
-check 'sync_only is reported when set' "$(jq -r '.sync_only' "${A3M_STATUS}")" 'true'
+check 'a terminal phase is written through' "$(jq -r '.phase' "${A3M_STATUS}")" 'synced'
 
 # --- Re-init does not lose what the panel wrote -------------------------------
 

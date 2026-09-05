@@ -106,7 +106,7 @@ jobs:
           if len(names) != len(set(names)):
               problems.append('duplicate env_variable in variables')
 
-          for wanted in ('A3M_SYNC_ONLY', 'A3M_POLL_INTERVAL', 'A3M_DISABLE',
+          for wanted in ('A3M_POLL_INTERVAL', 'A3M_DISABLE',
                          'A3M_BACKGROUND_SYNC', 'A3M_SYNC_POLL', 'A3M_SYNC_NICE'):
               if wanted not in names:
                   problems.append('missing added variable: %s' % wanted)

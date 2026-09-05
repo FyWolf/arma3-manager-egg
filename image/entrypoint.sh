@@ -14,8 +14,8 @@
 #   1. It writes machine-readable download progress to .arma3-manager/status.json
 #      so the panel can report per-mod state instead of guessing from directory
 #      listings.
-#   2. A3M_SYNC_ONLY downloads and updates mods, then exits without starting the
-#      game server.
+#   2. It starts a background mod downloader alongside the game, so mods can be
+#      fetched at any time without stopping or restarting the server.
 #
 # Everything else is upstream and is deliberately left alone, so that pulling a
 # newer upstream entrypoint stays a readable diff. AGPL-3.0-or-later, as upstream.
@@ -385,40 +385,6 @@ if [[ ${UPDATE_SERVER} == 1 ]]; then
 
         echo -e "${GREEN}[UPDATE]:${NC} Steam Workshop mod update check ${GREEN}complete${NC}!"
     fi
-fi
-
-## A3M === SYNC-ONLY MODE ===
-#
-# Download and update mods, then stop without starting the game.
-#
-# This is the whole reason a customer can press "Download mods" in the panel and
-# not have players dropped into a server that is about to restart anyway. Arma
-# reads its mod list once, at startup, so mods fetched underneath a running
-# server would not be loaded until the next boot regardless — the choice is only
-# ever *when* the restart happens, and this makes it the customer's.
-#
-# It exits 0. Wings treats a non-zero exit as a crash and will restart the
-# container on a crash-restart policy, which would download-and-exit in a loop.
-if [[ ${A3M_SYNC_ONLY} == "1" ]]; then
-    A3M_MonitorStop
-
-    failed=$(jq -r '.totals.failed // 0' "${A3M_STATUS}" 2>/dev/null)
-    [[ $failed =~ ^[0-9]+$ ]] || failed=0
-
-    if [[ $failed -gt 0 ]]; then
-        # Deliberately still a clean exit: the per-mod reasons are in status.json
-        # and on screen, and the panel is the thing that should decide what a
-        # partial sync means. A crash here would bury them behind a restart.
-        A3M_Phase "synced_with_errors"
-        echo -e "\n${YELLOW}[A3M]: Mod sync finished with ${CYAN}${failed}${YELLOW} mod(s) unaccounted for.${NC}"
-        echo -e "\tThe panel's Mods page names them. Starting the server again retries only those."
-    else
-        A3M_Phase "synced"
-        echo -e "\n${GREEN}[A3M]: Mod sync complete.${NC} The server was not started, because A3M_SYNC_ONLY is set."
-    fi
-
-    echo -e "${GREEN}[A3M]:${NC} Clear that variable to boot normally.\n"
-    exit 0
 fi
 
 # Check if specified server binary exists.
